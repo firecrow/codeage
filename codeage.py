@@ -19,6 +19,17 @@ def get_datetime_avg(filepath, relative_date):
     return avg_age
 
 
+def show_results(results):
+    max_width = len('filepath') 
+    for k,v in results:
+        if len(k) > max_width:
+            max_width = len(k)
+    max_width += 3
+
+    print "filepath"+(max_width-len('filepath'))*' '+'value'
+    for k,v in results:
+        print k+((max_width-len(k))*'-')+str(v)
+
 if __name__ == '__main__':
     import argparse
 
@@ -59,10 +70,11 @@ if __name__ == '__main__':
     args = process_args()
         
     now = datetime.datetime.now()
+    results = []
     if args['type'] == 'files':
         for f in args['files']:
-            get_datetime_avg(f, now)
+            avg = get_datetime_avg(f, now)
+            results.append((f,avg))
 
-
-
+    show_results(results)
 
