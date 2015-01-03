@@ -35,10 +35,21 @@ class CodeAgeDir(CodeAgeItem):
 
         os.path.walk(self.filepath, walk, None)
 
-
-class AgeView(object):
+class View(object):
     def __init__(self):
         self.values = ''
+        self.sort_reverse = False
+    def proc_value(self, relative_days, relative_date):
+        pass
+    def render_values(self):
+        pass 
+    def get_sort_key(self):
+        pass
+
+class AgeView(View):
+    def __init__(self):
+        self.values = ''
+        self.sort_reverse = True 
 
     def proc_value(self, relative_days, relative_date):
         total_days = sum(relative_days)
@@ -56,15 +67,49 @@ class AgeView(object):
     def render_values(self):
         return str(self.values['avg_age'])
 
-def show_results(results):
+    def get_sort_key(self):
+        return self.values['avg_age']
+
+
+class SinceView(View):
+    def __init__(self):
+        self.values = ''
+        self.sort_reverse = True 
+
+    def proc_value(self, relative_days, relative_date):
+        total_count = len(relative_days)
+        since_count = len([x for x in relative_days if x < 0])
+        self.values = {
+            'total_count': total_count,
+            'since_count': since_count,
+        }
+
+    def render_values(self):
+        return '%s/%s' % (self.values['since_count'], self.values['total_count'])
+
+    def get_sort_key(self):
+        return float(self.values['since_count'])/self.values['total_count']*100
+
+
+class SinceViewPercent(SinceView):
+    def render_values(self):
+        return  str(int(float(self.values['since_count'])/self.values['total_count']*100)) + '%'
+
+
+def show_results(results, args):
     max_width = len('filepath') 
     for v in results:
         if len(v.filepath) > max_width:
             max_width = len(v.filepath)
     max_width += 3
 
-    print "filepath"+(max_width-len('filepath'))*' '+'value'
-    results = sorted(results, key=lambda x: x.view.values['avg_days'])
+    if args['since']:
+        value_column_name = 'lines since %s' % args['since']
+    else:
+        value_column_name = 'average age'
+
+    print "filepath"+(max_width-len('filepath'))*' '+value_column_name
+    results = sorted(results, key=lambda x: x.view.get_sort_key(), reverse=results[0].view.sort_reverse)
     for v in results:
         print v.filepath+((max_width-len(v.filepath))*'-')+str(v.view.render_values())
 
@@ -75,53 +120,47 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(
             description="Bucket lines or percentage of file in git blame\nto show code age average or number since a given date")
 
-        parser.add_argument('--after','-t', type=str, nargs='?',
+        parser.add_argument('--since','-s', type=str, nargs='?',
             help="date (e.g. 2012-01-21) show only counts for lines altered after this date")
-
-        parser.add_argument('--depth','-d', type=int, nargs='?',
-            help="n aggregate values to the n folder level")
 
         parser.add_argument('--files','-f', nargs='+',
             help="files and directories to gather data from")
 
-        parser.add_argument('--lines','-l', action='store_true',
-            help="show line numbers, meaingless without --after")
-        parser.add_argument('--average','-a', type=bool,
-            help="show the average date for the file if --files or files in folder if --folders (DEFAULT)")
+        parser.add_argument('--percent','-p', action='store_true',
+            help="show percentage of lines, only works with --since flag")
 
         args_obj = parser.parse_args()
         # lack of dict comprehensions in python 2.6
         _args = {}
         for k,v in args_obj._get_kwargs():
             _args[k] = v
-
-        # set defaults
-        if _args['depth']:
-            _args['type'] = 'folder'
-        else:
-            _args['type'] = 'files'
-
-        if not _args['lines']:
-            _args['average'] = True
         return _args
 
     args = process_args()
         
-    now = datetime.datetime.now()
     results = []
-    if args['type'] == 'files':
-        for f in args['files']:
-            if os.path.exists(f):
-                if os.path.isdir(f):
-                    if f[-1] != '/':
-                        f += '/'
-                    item = CodeAgeDir(f, now, AgeView())
-                    results.append(item)
-                else:
-                    item = CodeAgeItem(f, now, AgeView())
-                    results.append(item)
-            else:
-                print "file not found %s" % f
+    
+    if args['since']:
+        relative_date = datetime.datetime.strptime(args['since'], '%Y-%m-%d')
+        if args['percent']:
+            viewcls = SinceViewPercent
+        else:
+            viewcls = SinceView
+    else:
+        relative_date = datetime.datetime.now()
+        viewcls = AgeView
 
-    show_results(results)
+    for f in args['files']:
+        if os.path.exists(f):
+            if os.path.isdir(f):
+                if f[-1] != '/':
+                    f += '/'
+                item = CodeAgeDir(f, relative_date, viewcls())
+            else:
+                item = CodeAgeItem(f, relative_date, viewcls())
+            results.append(item)
+        else:
+            print "file not found %s" % f
+
+    show_results(results, args)
 
