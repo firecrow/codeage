@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import datetime, subprocess, re
+import datetime, subprocess, re, os
 
 def get_datetime_avg(filepath, relative_date):
     handle = subprocess.Popen(['git', 'blame', filepath], stdout=subprocess.PIPE)
@@ -14,9 +14,41 @@ def get_datetime_avg(filepath, relative_date):
             (relative_date - datetime.datetime.strptime(x, '%Y-%m-%d')).days 
                 for x in extracted]
 
-    avg_days = sum(relatives) / len(relatives)
-    avg_age = relative_date - datetime.timedelta(days=avg_days) 
-    return avg_age
+    try:
+        total_days = sum(relatives)
+        total_count = len(relatives)
+
+        avg_days = total_days / total_count 
+        avg_age = relative_date - datetime.timedelta(days=avg_days) 
+
+        return (avg_age, total_days, total_count)
+    except ZeroDivisionError, e:
+        print "zero division error %s" % e
+        return (0, 0, 0)
+
+
+def aggregate_dir(filepath, relative_date):
+    results = []
+    def walk(_, dir, files):
+        for f in files:
+            if os.path.isdir(dir+'/'+f):
+                continue
+            item = get_datetime_avg(dir+'/'+f, relative_date)
+            results.append((f,item))
+
+    os.path.walk(filepath, walk, None)
+
+    try:
+        total_count = sum([x[1][2] for x in results])
+        total_days = sum([x[1][1] for x in results])
+
+        avg_days = total_days / total_count
+        avg_age = relative_date - datetime.timedelta(days=avg_days) 
+
+        return (avg_age, total_days, total_count)
+    except ZeroDivisionError, e:
+        print "zero division error %s" % e
+        return (0, 0, 0)
 
 
 def show_results(results):
@@ -29,7 +61,7 @@ def show_results(results):
     print "filepath"+(max_width-len('filepath'))*' '+'value'
     results = sorted(results, key=lambda x: x[1], reverse=True)
     for k,v in results:
-        print k+((max_width-len(k))*'-')+str(v)
+        print k+((max_width-len(k))*'-')+str(v[0])
 
 if __name__ == '__main__':
     import argparse
@@ -74,8 +106,17 @@ if __name__ == '__main__':
     results = []
     if args['type'] == 'files':
         for f in args['files']:
-            avg = get_datetime_avg(f, now)
-            results.append((f,avg))
+            if os.path.exists(f):
+                if os.path.isdir(f):
+                    item = aggregate_dir(f, now)
+                    if f[-1] != '/':
+                        f += '/'
+                    results.append((f, item))
+                else:
+                    item = get_datetime_avg(f, now)
+                    results.append((f, item))
+            else:
+                print "file not found %s" % f
 
     show_results(results)
 
