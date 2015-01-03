@@ -1,67 +1,77 @@
 #!/usr/bin/env python
 import datetime, subprocess, re, os
 
-def get_datetime_avg(filepath, relative_date):
-    handle = subprocess.Popen(['git', 'blame', filepath], stdout=subprocess.PIPE)
-    lines = handle.stdout.read().split('\n')
-    extracted = []
-    for l in lines:
-        me = re.search('(\d{4}-\d{2}-\d{2})', l)
-        if me:
-            extracted.append(me.group(0))
+class CodeAgeItem(object):
+    def __init__(self, filepath, relative_date):
+        self.filepath = filepath
+        self.relative_date = relative_date
+        self.data = []
+        self.line_count = 0
+        self.total_days = 0 
+        self.avg_age = None
+        self.avg_days = None
+        self._gather_data()
 
-    relatives = [
-            (relative_date - datetime.datetime.strptime(x, '%Y-%m-%d')).days 
-                for x in extracted]
+    def _gather_data(self): 
+        handle = subprocess.Popen(['git', 'blame', self.filepath], stdout=subprocess.PIPE)
+        lines = handle.stdout.read().split('\n')
+        extracted = []
+        for l in lines:
+            me = re.search('(\d{4}-\d{2}-\d{2})', l)
+            if me:
+                extracted.append(me.group(0))
 
-    try:
+        relatives = [
+                (self.relative_date - datetime.datetime.strptime(x, '%Y-%m-%d')).days 
+                    for x in extracted]
+
         total_days = sum(relatives)
         total_count = len(relatives)
 
         avg_days = total_days / total_count 
-        avg_age = relative_date - datetime.timedelta(days=avg_days) 
+        avg_age = self.relative_date - datetime.timedelta(days=avg_days) 
 
-        return (avg_age, total_days, total_count)
-    except ZeroDivisionError, e:
-        print "zero division error %s" % e
-        return (0, 0, 0)
+        self.total_count = total_count
+        self.total_days = total_days
+        self.avg_days = avg_days
+        self.avg_age = avg_age
 
 
-def aggregate_dir(filepath, relative_date):
-    results = []
-    def walk(_, dir, files):
-        for f in files:
-            if os.path.isdir(dir+'/'+f):
-                continue
-            item = get_datetime_avg(dir+'/'+f, relative_date)
-            results.append((f,item))
+class CodeAgeDir(CodeAgeItem):
+    def _gather_data(self): 
+        results = []
+        def walk(_, dir, files):
+            for f in files:
+                if os.path.isdir(dir+'/'+f):
+                    continue
+                item = CodeAgeItem(dir+'/'+f, self.relative_date)
+                results.append(item)
 
-    os.path.walk(filepath, walk, None)
+        os.path.walk(self.filepath, walk, None)
 
-    try:
-        total_count = sum([x[1][2] for x in results])
-        total_days = sum([x[1][1] for x in results])
+        total_count = sum([x.total_count for x in results])
+        total_days = sum([x.total_days for x in results])
 
         avg_days = total_days / total_count
-        avg_age = relative_date - datetime.timedelta(days=avg_days) 
+        avg_age = self.relative_date - datetime.timedelta(days=avg_days) 
 
-        return (avg_age, total_days, total_count)
-    except ZeroDivisionError, e:
-        print "zero division error %s" % e
-        return (0, 0, 0)
+        self.total_count = total_count
+        self.total_days = total_days
+        self.avg_days = avg_days
+        self.avg_age = avg_age
 
 
 def show_results(results):
     max_width = len('filepath') 
-    for k,v in results:
-        if len(k) > max_width:
-            max_width = len(k)
+    for v in results:
+        if len(v.filepath) > max_width:
+            max_width = len(v.filepath)
     max_width += 3
 
     print "filepath"+(max_width-len('filepath'))*' '+'value'
-    results = sorted(results, key=lambda x: x[1], reverse=True)
-    for k,v in results:
-        print k+((max_width-len(k))*'-')+str(v[0])
+    results = sorted(results, key=lambda x: x.avg_days, reverse=True)
+    for v in results:
+        print v.filepath+((max_width-len(v.filepath))*'-')+str(v.avg_age)
 
 if __name__ == '__main__':
     import argparse
@@ -108,13 +118,13 @@ if __name__ == '__main__':
         for f in args['files']:
             if os.path.exists(f):
                 if os.path.isdir(f):
-                    item = aggregate_dir(f, now)
                     if f[-1] != '/':
                         f += '/'
-                    results.append((f, item))
+                    item = CodeAgeDir(f, now)
+                    results.append(item)
                 else:
-                    item = get_datetime_avg(f, now)
-                    results.append((f, item))
+                    item = CodeAgeItem(f, now)
+                    results.append(item)
             else:
                 print "file not found %s" % f
 
