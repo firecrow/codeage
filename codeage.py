@@ -27,6 +27,7 @@ def show_results(results):
     max_width += 3
 
     print "filepath"+(max_width-len('filepath'))*' '+'value'
+    results = sorted(results, key=lambda x: x[1], reverse=True)
     for k,v in results:
         print k+((max_width-len(k))*'-')+str(v)
 
