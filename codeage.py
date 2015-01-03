@@ -2,15 +2,14 @@
 import datetime, subprocess, re, os
 
 class CodeAgeItem(object):
-    def __init__(self, filepath, relative_date):
+    def __init__(self, filepath, relative_date, view=None):
         self.filepath = filepath
         self.relative_date = relative_date
-        self.data = []
-        self.line_count = 0
-        self.total_days = 0 
-        self.avg_age = None
-        self.avg_days = None
+        self.view = view
+        self.relative_days = []
         self._gather_data()
+        if view:
+            self.view.proc_value(self.relative_days, self.relative_date)
 
     def _gather_data(self): 
         handle = subprocess.Popen(['git', 'blame', self.filepath], stdout=subprocess.PIPE)
@@ -21,45 +20,41 @@ class CodeAgeItem(object):
             if me:
                 extracted.append(me.group(0))
 
-        relatives = [
+        self.relative_days = [
                 (self.relative_date - datetime.datetime.strptime(x, '%Y-%m-%d')).days 
                     for x in extracted]
 
-        total_days = sum(relatives)
-        total_count = len(relatives)
-
-        avg_days = total_days / total_count 
-        avg_age = self.relative_date - datetime.timedelta(days=avg_days) 
-
-        self.total_count = total_count
-        self.total_days = total_days
-        self.avg_days = avg_days
-        self.avg_age = avg_age
-
-
 class CodeAgeDir(CodeAgeItem):
     def _gather_data(self): 
-        results = []
         def walk(_, dir, files):
             for f in files:
                 if os.path.isdir(dir+'/'+f):
                     continue
                 item = CodeAgeItem(dir+'/'+f, self.relative_date)
-                results.append(item)
+                self.relative_days.extend(item.relative_days)
 
         os.path.walk(self.filepath, walk, None)
 
-        total_count = sum([x.total_count for x in results])
-        total_days = sum([x.total_days for x in results])
 
-        avg_days = total_days / total_count
-        avg_age = self.relative_date - datetime.timedelta(days=avg_days) 
+class AgeView(object):
+    def __init__(self):
+        self.values = ''
 
-        self.total_count = total_count
-        self.total_days = total_days
-        self.avg_days = avg_days
-        self.avg_age = avg_age
+    def proc_value(self, relative_days, relative_date):
+        total_days = sum(relative_days)
+        total_count = len(relative_days)
 
+        avg_days = total_days / total_count 
+        avg_age = relative_date - datetime.timedelta(days=avg_days) 
+        self.values = {
+            'total_count': total_count,
+            'total_days': total_days,
+            'avg_days': avg_days,
+            'avg_age':  avg_age,
+        }
+
+    def render_values(self):
+        return str(self.values['avg_age'])
 
 def show_results(results):
     max_width = len('filepath') 
@@ -69,9 +64,9 @@ def show_results(results):
     max_width += 3
 
     print "filepath"+(max_width-len('filepath'))*' '+'value'
-    results = sorted(results, key=lambda x: x.avg_days, reverse=True)
+    results = sorted(results, key=lambda x: x.view.values['avg_days'])
     for v in results:
-        print v.filepath+((max_width-len(v.filepath))*'-')+str(v.avg_age)
+        print v.filepath+((max_width-len(v.filepath))*'-')+str(v.view.render_values())
 
 if __name__ == '__main__':
     import argparse
@@ -120,10 +115,10 @@ if __name__ == '__main__':
                 if os.path.isdir(f):
                     if f[-1] != '/':
                         f += '/'
-                    item = CodeAgeDir(f, now)
+                    item = CodeAgeDir(f, now, AgeView())
                     results.append(item)
                 else:
-                    item = CodeAgeItem(f, now)
+                    item = CodeAgeItem(f, now, AgeView())
                     results.append(item)
             else:
                 print "file not found %s" % f
