@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import datetime, subprocess, re, os
+import datetime, subprocess, re, os, sys
 
 class CodeAgeItem(object):
     def __init__(self, filepath, relative_date, view=None):
@@ -12,7 +12,7 @@ class CodeAgeItem(object):
             self.view.proc_value(self.relative_days, self.relative_date)
 
     def _gather_data(self): 
-        handle = subprocess.Popen(['git', 'blame', self.filepath], stdout=subprocess.PIPE)
+        handle = subprocess.Popen(['git', 'blame', self.filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         lines = handle.stdout.read().split('\n')
         extracted = []
         for l in lines:
@@ -26,19 +26,55 @@ class CodeAgeItem(object):
 
 class CodeAgeDir(CodeAgeItem):
     def _gather_data(self): 
+        handle = subprocess.Popen(['find', self.filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        lines = handle.stdout.read().split('\n')
+        total_files_count = 0
+        for l in lines:
+            if l:
+                if l[-1] == '/':
+                    continue
+                total_files_count += 1
+
+        files_count = [0]
         def walk(_, dir, files):
             for f in files:
                 if os.path.isdir(dir+'/'+f):
                     continue
                 item = CodeAgeItem(dir+'/'+f, self.relative_date)
                 self.relative_days.extend(item.relative_days)
+                files_count[0] += 1
+                self.view.set_status('file', {
+                        'files_count':files_count[0], 
+                        'total_files_count':total_files_count,
+                        'filepath':self.filepath,
+                    })
 
         os.path.walk(self.filepath, walk, None)
 
 class View(object):
-    def __init__(self):
+    def __init__(self, total_file_args):
         self.values = ''
         self.sort_reverse = False
+        self.total_file_args = total_file_args
+        self.tool = RenderTools()
+        self.file_complete_count = 0
+        self.current_file = None
+
+    def set_status(self, type, data):
+        if type == 'file':
+            if self.current_file != data['filepath']:
+                self.file_complete_count += 1
+                self.current_file = data['filepath']
+            pathname_length = len(data['filepath'])
+            percent = int(float(data['files_count'])/data['total_files_count']*100)
+            sys.stdout.write(data['filepath'] + ' ')
+            sys.stdout.write(self.tool.render_spinner())
+            sys.stdout.write('%s%%' % percent)
+            count_str = ' %s of %s' % (self.file_complete_count, self.total_file_args)
+            sys.stdout.write(' %s' % count_str)
+            sys.stdout.write('\033[%sD' % (len(count_str)+1+pathname_length + 6))
+            sys.stdout.flush()
+
     def proc_value(self, relative_days, relative_date):
         pass
     def render_values(self):
@@ -47,9 +83,14 @@ class View(object):
         pass
 
 class AgeView(View):
-    def __init__(self):
+    def __init__(self, total_file_args):
         self.values = ''
         self.sort_reverse = True 
+        self.total_file_args = total_file_args
+        self.tool = RenderTools()
+        self.total_file_args = total_file_args
+        self.file_complete_count = 0
+        self.current_file = None
 
     def proc_value(self, relative_days, relative_date):
         total_days = sum(relative_days)
@@ -72,9 +113,14 @@ class AgeView(View):
 
 
 class SinceView(View):
-    def __init__(self):
+    def __init__(self, total_file_args):
         self.values = ''
         self.sort_reverse = True 
+        self.total_file_args = total_file_args
+        self.tool = RenderTools()
+        self.total_file_args = total_file_args
+        self.file_complete_count = 0
+        self.current_file = None
 
     def proc_value(self, relative_days, relative_date):
         total_count = len(relative_days)
@@ -89,6 +135,24 @@ class SinceView(View):
 
     def get_sort_key(self):
         return float(self.values['since_count'])/self.values['total_count']*100
+
+
+
+class RenderTools(object):
+    def __init__(self):
+        self.states = ['|','/','-','\\','|','/','-', '\\']
+        self.state = 0
+
+    def render_spinner(self):
+        val = self.states[self.state]
+        self.increment()
+        return val
+
+    def increment(self):
+        if self.state > 6:
+            self.state = 0
+            return
+        self.state += 1
 
 
 class SinceViewPercent(SinceView):
@@ -150,15 +214,17 @@ if __name__ == '__main__':
         relative_date = datetime.datetime.now()
         viewcls = AgeView
 
+    view = viewcls(len(args['files']))
     for f in args['files']:
         if os.path.exists(f):
             if os.path.isdir(f):
                 if f[-1] != '/':
                     f += '/'
-                item = CodeAgeDir(f, relative_date, viewcls())
+                item = CodeAgeDir(f, relative_date, view)
             else:
-                item = CodeAgeItem(f, relative_date, viewcls())
-            results.append(item)
+                item = CodeAgeItem(f, relative_date, view)
+            if item.relative_days:
+                results.append(item)
         else:
             print "file not found %s" % f
 
